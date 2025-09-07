@@ -571,7 +571,7 @@ export default function AttendancePlanner() {
           </div>
         </div>
       </div>
-      ;{/* ✅ 점검 참여인원 (이름 클릭 시 달력 강조) */}
+      {/* ✅ 점검 참여인원 (이름 클릭 시 달력 강조) */}
       <div className="border rounded-2xl p-3 shadow-sm">
         <div className="text-sm font-medium mb-2">점검 참여인원</div>
         {allPeople.length === 0 ? (
@@ -602,7 +602,7 @@ export default function AttendancePlanner() {
           </div>
         )}
       </div>
-      ;{/* 입력된 날짜 (총 X일)별 인원 */}
+      {/* 입력된 날짜 (총 X일)별 인원 */}
       <div className="border rounded-2xl p-3 shadow-sm">
         <div className="text-sm font-medium mb-2">
           입력된 날짜 (총 {entries.length}일)별 인원
