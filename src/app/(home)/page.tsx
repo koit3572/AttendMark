@@ -332,6 +332,30 @@ export default function AttendancePlanner() {
               </label>
             </div>
 
+            {/* 구간 병합 방식 토글 */}
+            {/* <div>
+              <div className="text-sm font-medium mb-1">구간 병합 방식</div>
+              <div className="flex gap-3">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="merge-mode"
+                    checked={!mergeAllSpan}
+                    onChange={() => setMergeAllSpan(false)}
+                  />
+                  <span>틈 유지</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="merge-mode"
+                    checked={mergeAllSpan}
+                    onChange={() => setMergeAllSpan(true)}
+                  />
+                  <span>연속 병합</span>
+                </label>
+              </div>
+            </div> */}
           </div>
 
           <button
@@ -486,14 +510,17 @@ export default function AttendancePlanner() {
 
                 const periodInline = `${first.periods} (${first.days}일)`;
 
-
                 return (
                   <React.Fragment key={`${first.datesKey}-${first.days}`}>
                     <tr className="border-t align-top">
                       <td className="p-2 whitespace-nowrap">{first.name}</td>
-                      <td className=" relative p-2 whitespace-nowrap" rowSpan={rowSpan}>
-                        <div className='absolute top-[calc(50%-0.5rem)]'>{periodInline}</div>
-                        
+                      <td
+                        className=" relative p-2 whitespace-nowrap"
+                        rowSpan={rowSpan}
+                      >
+                        <div className="absolute top-[calc(50%-0.5rem)]">
+                          {periodInline}
+                        </div>
                       </td>
                     </tr>
                     {group.slice(1).map((r) => (
