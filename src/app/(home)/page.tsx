@@ -1,5 +1,6 @@
 "use client";
 import React, { useMemo, useState } from "react";
+import Holidays from "date-holidays";
 
 /** ============ Types ============ */
 interface Entry {
@@ -22,7 +23,7 @@ const addDays = (iso: string, n: number) => {
   d.setDate(d.getDate() + n);
   return toISO(d);
 };
-const isConsecutive = (a: string, b: string) => addDays(a, 1) === b;
+const isNextDay = (a: string, b: string) => addDays(a, 1) === b;
 
 const formatDate = (iso: string, fmt: DateFormat) => {
   const d = fromISO(iso);
@@ -35,7 +36,43 @@ const classNames = (...xs: (string | false | undefined)[]) =>
 
 const uniqueSorted = <T,>(arr: T[]) => Array.from(new Set(arr));
 
-/** ============ Calendar ============ */
+/** ============ Holidays ============ */
+
+// 한국(KR) 공휴일 판정기 (대체공휴일 포함)
+const hdKR = new Holidays("KR");
+
+// 공휴일 여부 (한국 기준)
+function isKoreanHolidayISO(iso: string): boolean {
+  // date-holidays는 Date 객체/타임존에 민감도 낮지만, 안전하게 로컬 자정 기준으로 처리
+  const d = fromISO(iso);
+  const hit = hdKR.isHoliday(d); // false 또는 holiday 객체/배열
+  return !!hit;
+}
+
+/** 일요일/공휴일이면 true */
+function isRedDay(iso: string): boolean {
+  const d = fromISO(iso);
+  const isSunday = d.getDay() === 0;
+  const isHoliday = isKoreanHolidayISO(iso); // ✅ 한국 공휴일 반영
+  return isSunday || isHoliday;
+}
+
+/** a 다음날~b 전날이 모두 '토요일 또는 일요일 또는 지정 공휴일'이면 true */
+function areAllWeekendOrHolidayBetween(aISO: string, bISO: string): boolean {
+  let cur = addDays(aISO, 1);
+  while (cur < bISO) {
+    const d = fromISO(cur);
+    const isSat = d.getDay() === 6; // 토요일
+    const isSun = d.getDay() === 0; // 일요일
+    const isHoliday = isKoreanHolidayISO(cur); // ✅ 한국 공휴일
+
+    if (!(isSat || isSun || isHoliday)) return false;
+    cur = addDays(cur, 1);
+  }
+  return true;
+}
+
+/** ============ Calendar Matrix ============ */
 function buildCalendarMatrix(year: number, monthIndex: number) {
   const first = new Date(year, monthIndex, 1);
   const start = new Date(first);
@@ -55,18 +92,16 @@ function buildCalendarMatrix(year: number, monthIndex: number) {
 
 /** ============ Aggregation ============ */
 /**
- * aggregateByPerson
- * - mergeAllSpan=false: 인접 날짜만 병합 (틈 유지)
- * - mergeAllSpan=true: 선택 날짜가 흩어져 있어도 최소~최대로 하나의 구간으로 병합
- * - 반환값에 각 사람의 'datesKey'(정렬된 ISO 리스트)도 포함하여, rowSpan 병합 시 문자열 대신 날짜세트로 그룹핑.
+ * - mergeAcrossRedGaps: 사이 날짜가 모두 토/일/공휴일이면 구간을 연결
+ * - days: 실제 선택된 날짜 수
+ * - rowSpan 병합: 정규화된 날짜세트(datesKey) + days 기준
  */
-// 기존 aggregateByPerson(entries, fmt, mergeAllSpan) 함수 전체를 이걸로 교체
 function aggregateByPerson(
   entries: Entry[],
   fmt: DateFormat,
-  mergeAllSpan: boolean
+  mergeAcrossRedGaps: boolean
 ) {
-  // name -> ISO 날짜들
+  // name -> sorted unique ISO dates
   const m = new Map<string, string[]>();
   for (const e of entries) {
     for (const nm of e.names) {
@@ -76,7 +111,6 @@ function aggregateByPerson(
       m.set(nm, arr);
     }
   }
-  // 정렬 + 중복 제거
   for (const [k, arr] of m) {
     arr.sort();
     m.set(k, uniqueSorted(arr));
@@ -84,9 +118,9 @@ function aggregateByPerson(
 
   type Row = {
     name: string;
-    periods: string;
-    days: number; // ✅ 실제 선택된 날짜 수
-    datesKey: string; // rowSpan 병합용 정규화 키
+    periods: string; // "YYYY.MM.DD~YYYY.MM.DD, ..." or "MM/DD~MM/DD, ..."
+    days: number; // 선택된 날짜 수
+    datesKey: string; // 병합용 (정렬된 ISO join)
   };
 
   const out: Row[] = [];
@@ -94,45 +128,42 @@ function aggregateByPerson(
   for (const [name, dates] of m) {
     if (dates.length === 0) continue;
 
-    // ✅ days는 무조건 '선택된 날짜 개수'
     const selectedCount = dates.length;
+    const segments: [string, string][] = [];
 
-    // 기간 표시는 옵션에 따라
-    let segments: [string, string][];
-    if (mergeAllSpan) {
-      // 최소~최대 한 구간으로 표기만 병합 (일수는 selectedCount 사용)
-      segments = [[dates[0], dates[dates.length - 1]]];
-    } else {
-      // 인접 날짜만 병합
-      segments = [];
-      let start = dates[0];
-      let prev = dates[0];
-      for (let i = 1; i < dates.length; i++) {
-        const cur = dates[i];
-        if (isConsecutive(prev, cur)) {
-          prev = cur;
-        } else {
-          segments.push([start, prev]);
-          start = prev = cur;
-        }
+    // 인접/주말·공휴일 간격 연결
+    let start = dates[0];
+    let prev = dates[0];
+
+    for (let i = 1; i < dates.length; i++) {
+      const cur = dates[i];
+      const connected =
+        isNextDay(prev, cur) ||
+        (mergeAcrossRedGaps && areAllWeekendOrHolidayBetween(prev, cur));
+      if (connected) {
+        prev = cur;
+      } else {
+        segments.push([start, prev]);
+        start = prev = cur;
       }
-      segments.push([start, prev]);
     }
+    segments.push([start, prev]);
 
-    // 포맷팅 (표시는 기존과 동일)
     const formatted = segments.map(([s, e]) =>
       s === e
-        ? `${formatDate(s, fmt)}`
-        : `${formatDate(s, fmt)}~${formatDate(e, fmt)}`
+        ? formatDate(s, fmt)
+        : `${formatDate(s, fmt)}~${
+            formatDate(s, fmt) === formatDate(e, fmt)
+              ? formatDate(e, fmt)
+              : formatDate(e, fmt)
+          }`
     );
-
-    // 날짜세트 키 (문자열 표기와 무관하게 동일 날짜면 병합됨)
     const datesKey = dates.join(",");
 
     out.push({
       name,
       periods: formatted.join(", "),
-      days: selectedCount, // ✅ 여기!
+      days: selectedCount,
       datesKey,
     });
   }
@@ -147,7 +178,7 @@ export default function AttendancePlanner() {
   const [year, setYear] = useState<number>(today.getFullYear());
   const [month, setMonth] = useState<number>(today.getMonth()); // 0-11
 
-  // 날짜 선택: 개별 토글 방식 유지
+  // 날짜 선택(개별 토글)
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
 
   // 입력 데이터
@@ -156,17 +187,70 @@ export default function AttendancePlanner() {
 
   // 표기/병합 옵션
   const [fmt, setFmt] = useState<DateFormat>("YYYY.MM.DD");
-  const [mergeAllSpan] = useState<boolean>(false);
+  const [mergeAcrossRedGaps, setMergeAcrossRedGaps] = useState<boolean>(false);
+
+  // ✅ 삭제 확인 모달 상태
+  const [confirm, setConfirm] = useState<{
+    open: boolean;
+    date: string | null;
+  }>({
+    open: false,
+    date: null,
+  });
 
   const matrix = useMemo(() => buildCalendarMatrix(year, month), [year, month]);
   const monthLabel = useMemo(() => `${year}.${pad(month + 1)}`, [year, month]);
 
+  // ✅ 날짜 토글(모달 확인 포함)
   function toggleDate(iso: string) {
-    setSelectedDates((prev) => {
-      const has = prev.includes(iso);
-      const next = has ? prev.filter((d) => d !== iso) : [...prev, iso];
-      return next.sort();
+    const isSelected = selectedDates.includes(iso);
+
+    if (isSelected) {
+      // 이미 선택된 날짜를 해제하려는 경우 → 해당 날짜에 데이터(이름)가 있으면 모달 표시
+      const e = entries.find((x) => x.date === iso);
+      const hasData = !!e && e.names.length > 0;
+      if (hasData) {
+        setConfirm({ open: true, date: iso });
+        return; // 실제 해제/삭제는 모달에서 처리
+      }
+
+      // 데이터가 없으면 바로 해제
+      setSelectedDates((prev) => prev.filter((d) => d !== iso));
+      setTempInputs((p) => {
+        const { [iso]: _, ...rest } = p;
+        return rest;
+      });
+      return;
+    }
+
+    // 새로 선택
+    setSelectedDates((prev) => [...prev, iso].sort());
+  }
+
+  // ✅ 모달: 삭제 확정
+  function confirmDeleteDate() {
+    if (!confirm.date) return;
+    const date = confirm.date;
+
+    // 1) 선택 해제
+    setSelectedDates((prev) => prev.filter((d) => d !== date));
+
+    // 2) 해당 날짜 entries 삭제
+    setEntries((prev) => prev.filter((e) => e.date !== date));
+
+    // 3) 임시 입력값 제거
+    setTempInputs((p) => {
+      const { [date]: _, ...rest } = p;
+      return rest;
     });
+
+    // 4) 모달 닫기
+    setConfirm({ open: false, date: null });
+  }
+
+  // ✅ 모달: 취소
+  function cancelDeleteDate() {
+    setConfirm({ open: false, date: null });
   }
 
   function ensureEntry(dateISO: string) {
@@ -211,13 +295,13 @@ export default function AttendancePlanner() {
     });
   }
 
-  // 집계 (옵션 적용)
+  // 집계
   const byPerson = useMemo(
-    () => aggregateByPerson(entries, fmt, mergeAllSpan),
-    [entries, fmt, mergeAllSpan]
+    () => aggregateByPerson(entries, fmt, mergeAcrossRedGaps),
+    [entries, fmt, mergeAcrossRedGaps]
   );
 
-  /** 동일 날짜세트(정규화된 datesKey) + days 기준으로 병합 (rowSpan) */
+  /** 동일 날짜세트 + days 기준 rowSpan 병합 */
   const groupedForRowSpan = useMemo(() => {
     const groups: Record<
       string,
@@ -227,7 +311,6 @@ export default function AttendancePlanner() {
       const key = `${r.datesKey}|${r.days}`;
       (groups[key] ??= []).push(r);
     }
-    // 그룹 내 이름 정렬
     for (const k of Object.keys(groups)) {
       groups[k].sort((a, b) => a.name.localeCompare(b.name, "ko"));
     }
@@ -238,7 +321,6 @@ export default function AttendancePlanner() {
     <div className="mx-auto max-w-6xl p-4 space-y-6">
       <h1 className="text-2xl font-bold">점검 참여자 집계 도구</h1>
 
-      {/* Controls */}
       <div className="grid md:grid-cols-3 gap-4">
         {/* Calendar */}
         <div className="border rounded-2xl p-3 shadow-sm">
@@ -278,6 +360,9 @@ export default function AttendancePlanner() {
               const isCurrentMonth = d.getMonth() === month;
               const selected = selectedDates.includes(iso);
               const hasNames = entries.find((e) => e.date === iso);
+              const isSundayOrHoliday = isRedDay(iso);
+              const isSaturday = d.getDay() === 6;
+
               return (
                 <button
                   key={iso}
@@ -290,7 +375,17 @@ export default function AttendancePlanner() {
                   )}
                   title={iso}
                 >
-                  <div className="text-xs">{d.getDate()}</div>
+                  <div
+                    className={classNames(
+                      "text-xs",
+                      isSundayOrHoliday && "text-red-600 font-semibold",
+                      !isSundayOrHoliday &&
+                        isSaturday &&
+                        "text-blue-600 font-semibold"
+                    )}
+                  >
+                    {d.getDate()}
+                  </div>
                   <div className="text-[10px] line-clamp-2 leading-tight">
                     {hasNames?.names.join(", ")}
                   </div>
@@ -310,18 +405,10 @@ export default function AttendancePlanner() {
 
         {/* Settings */}
         <div className="border rounded-2xl p-3 shadow-sm space-y-4">
+          {/* 날짜 표기 형식 */}
           <div>
             <div className="text-sm font-medium mb-1">날짜 표기 형식</div>
             <div className="flex gap-3">
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="fmt"
-                  checked={fmt === "MM/DD"}
-                  onChange={() => setFmt("MM/DD")}
-                />
-                <span>00/00</span>
-              </label>
               <label className="flex items-center gap-2">
                 <input
                   type="radio"
@@ -331,32 +418,44 @@ export default function AttendancePlanner() {
                 />
                 <span>00.00.00</span>
               </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="fmt"
+                  checked={fmt === "MM/DD"}
+                  onChange={() => setFmt("MM/DD")}
+                />
+                <span>00/00</span>
+              </label>
             </div>
+          </div>
 
-            {/* 구간 병합 방식 토글 */}
-            {/* <div>
-              <div className="text-sm font-medium mb-1">구간 병합 방식</div>
-              <div className="flex gap-3">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="merge-mode"
-                    checked={!mergeAllSpan}
-                    onChange={() => setMergeAllSpan(false)}
-                  />
-                  <span>틈 유지</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="merge-mode"
-                    checked={mergeAllSpan}
-                    onChange={() => setMergeAllSpan(true)}
-                  />
-                  <span>연속 병합</span>
-                </label>
-              </div>
-            </div> */}
+          {/* 빨간날 간격 연결 (토·일요일/공휴일만) */}
+          <div>
+            <div className="text-sm font-medium mb-1">
+              영업일기준 간격 연결{" "}
+              <span className="text-gray-500">(토·일요일/공휴일 제외)</span>
+            </div>
+            <div className="flex gap-3">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="mergeRedGaps"
+                  checked={!mergeAcrossRedGaps}
+                  onChange={() => setMergeAcrossRedGaps(false)}
+                />
+                <span>끊음</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="mergeRedGaps"
+                  checked={mergeAcrossRedGaps}
+                  onChange={() => setMergeAcrossRedGaps(true)}
+                />
+                <span>연결</span>
+              </label>
+            </div>
           </div>
 
           <button
@@ -435,7 +534,7 @@ export default function AttendancePlanner() {
         </div>
       </div>
 
-      {/* 입력된 날짜별 인원 (자동 표 위) */}
+      {/* 입력된 날짜 (총 X일)별 인원 */}
       <div className="border rounded-2xl p-3 shadow-sm">
         <div className="text-sm font-medium mb-2">
           입력된 날짜 (총 {entries.length}일)별 인원
@@ -469,7 +568,7 @@ export default function AttendancePlanner() {
         </div>
       </div>
 
-      {/* 자동 생성 표: 동일 날짜세트 + 총일수 기준 rowSpan 병합, 한 줄 표기 */}
+      {/* 자동 생성 표: 동일 날짜세트 + days 기준 rowSpan 병합 (한 줄 표기) */}
       <div className="border rounded-2xl p-3 shadow-sm">
         <div className="text-sm font-bold mb-2">자동 생성 표</div>
         <div className="overflow-x-auto">
@@ -493,18 +592,17 @@ export default function AttendancePlanner() {
               {Object.values(groupedForRowSpan).map((group) => {
                 const first = group[0];
                 const rowSpan = group.length;
-
-                const periodInline = `${first.periods} (${first.days}일)`;
+                const periodInline = `${first.periods} (${first.days}일)`; // 선택된 날짜 수
 
                 return (
                   <React.Fragment key={`${first.datesKey}-${first.days}`}>
                     <tr className="border-t align-top">
                       <td className="p-2 whitespace-nowrap">{first.name}</td>
                       <td
-                        className=" relative p-2 whitespace-nowrap"
+                        className=" relative h-full whitespace-nowrap"
                         rowSpan={rowSpan}
                       >
-                        <div className="absolute top-[calc(50%-0.5rem)]">
+                        <div className="absolute h-full p-2 flex items-center">
                           {periodInline}
                         </div>
                       </td>
@@ -524,6 +622,42 @@ export default function AttendancePlanner() {
           </table>
         </div>
       </div>
+
+      {/* ✅ 삭제 확인 모달 */}
+      {confirm.open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) cancelDeleteDate(); // 배경 클릭 시 취소
+          }}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+            <div className="text-lg font-semibold mb-2">날짜 선택 해제</div>
+            <div className="text-sm text-gray-600 mb-4">
+              이 날짜의 입력된 이름 데이터도 함께{" "}
+              <span className="font-semibold text-red-600">삭제</span>됩니다.
+              정말로 해제하고 삭제할까요?
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                className="px-4 py-2 rounded-xl border hover:bg-gray-50"
+                onClick={cancelDeleteDate}
+              >
+                취소
+              </button>
+              <button
+                className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
+                onClick={confirmDeleteDate}
+              >
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
