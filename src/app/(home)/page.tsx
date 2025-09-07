@@ -41,7 +41,7 @@ function buildCalendarMatrix(year: number, monthIndex: number) {
   const start = new Date(first);
   start.setDate(first.getDate() - first.getDay()); // Sun-first
   const matrix: string[][] = [];
-  let cursor = new Date(start);
+  const cursor = new Date(start);
   for (let w = 0; w < 6; w++) {
     const row: string[] = [];
     for (let d = 0; d < 7; d++) {
@@ -85,8 +85,8 @@ function aggregateByPerson(
   type Row = {
     name: string;
     periods: string;
-    days: number;      // ✅ 실제 선택된 날짜 수
-    datesKey: string;  // rowSpan 병합용 정규화 키
+    days: number; // ✅ 실제 선택된 날짜 수
+    datesKey: string; // rowSpan 병합용 정규화 키
   };
 
   const out: Row[] = [];
@@ -121,7 +121,9 @@ function aggregateByPerson(
 
     // 포맷팅 (표시는 기존과 동일)
     const formatted = segments.map(([s, e]) =>
-      s === e ? `${formatDate(s, fmt)}` : `${formatDate(s, fmt)}~${formatDate(e, fmt)}`
+      s === e
+        ? `${formatDate(s, fmt)}`
+        : `${formatDate(s, fmt)}~${formatDate(e, fmt)}`
     );
 
     // 날짜세트 키 (문자열 표기와 무관하게 동일 날짜면 병합됨)
@@ -130,7 +132,7 @@ function aggregateByPerson(
     out.push({
       name,
       periods: formatted.join(", "),
-      days: selectedCount,   // ✅ 여기!
+      days: selectedCount, // ✅ 여기!
       datesKey,
     });
   }
@@ -138,7 +140,6 @@ function aggregateByPerson(
   out.sort((a, b) => a.name.localeCompare(b.name, "ko"));
   return out;
 }
-
 
 /** ============ Component ============ */
 export default function AttendancePlanner() {
@@ -155,7 +156,7 @@ export default function AttendancePlanner() {
 
   // 표기/병합 옵션
   const [fmt, setFmt] = useState<DateFormat>("YYYY.MM.DD");
-  const [mergeAllSpan, setMergeAllSpan] = useState<boolean>(false);
+  const [mergeAllSpan] = useState<boolean>(false);
 
   const matrix = useMemo(() => buildCalendarMatrix(year, month), [year, month]);
   const monthLabel = useMemo(() => `${year}.${pad(month + 1)}`, [year, month]);
@@ -492,21 +493,6 @@ export default function AttendancePlanner() {
               {Object.values(groupedForRowSpan).map((group) => {
                 const first = group[0];
                 const rowSpan = group.length;
-                // 한 줄 표기 강제: "기간 (n일)"
-                const totalSpanDays = first.periods
-                  .split(",")
-                  .map((seg) => {
-                    const [s, e] = seg.includes("~")
-                      ? seg.split("~")
-                      : [seg, seg];
-                    const start = fromISO(toISO(new Date(s.trim())));
-                    const end = fromISO(toISO(new Date(e.trim())));
-                    return (
-                      Math.round((end.getTime() - start.getTime()) / 86400000) +
-                      1
-                    );
-                  })
-                  .reduce((a, b) => a + b, 0);
 
                 const periodInline = `${first.periods} (${first.days}일)`;
 
