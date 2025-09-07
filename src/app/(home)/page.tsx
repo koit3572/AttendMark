@@ -336,7 +336,6 @@ export default function AttendancePlanner() {
   return (
     <div className="mx-auto max-w-6xl p-4 space-y-6">
       <h1 className="text-2xl font-bold">점검 참여자 집계 도구</h1>
-
       <div className="grid md:grid-cols-3 gap-4">
         {/* Calendar */}
         <div className="border rounded-2xl p-3 shadow-sm">
@@ -385,14 +384,15 @@ export default function AttendancePlanner() {
                   key={iso}
                   onClick={() => toggleDate(iso)}
                   className={classNames(
-                    "relative h-16 border flex flex-col items-center justify-start p-1 hover:bg-gray-50",
+                    "border-gray-600 relative h-16 border flex flex-col items-center justify-start p-1 hover:bg-blue-200",
                     isHL
-                      ? "outline-2 bg-blue-400/80 outline-blue-400"
+                      ? " bg-blue-400/80 border-1 border-blue-400"
                       : !isCurrentMonth && "bg-gray-50 text-gray-400",
 
-                    selected && "ring-2 ring-blue-400 bg-blue-50",
+                    selected &&
+                      " ring-1 ring-blue-700 border-1 border-blue-600 bg-blue-100 z-10",
                     hasNames && !selected && "bg-blue-100",
-                    isHL && !selected && "bg-yellow-50"
+                    isHL && !selected && "bg-blue-300"
                   )}
                   title={iso}
                 >
@@ -542,7 +542,7 @@ export default function AttendancePlanner() {
                         className={classNames(
                           "inline-flex items-center gap-1 px-2 py-1 rounded-full",
                           highlightPerson === n
-                            ? "bg-yellow-200"
+                            ? "bg-yellow-100 ring-yellow-400 ring-1"
                             : "bg-gray-100"
                         )}
                       >
@@ -571,8 +571,7 @@ export default function AttendancePlanner() {
           </div>
         </div>
       </div>
-
-      {/* ✅ 점검 참여인원 (이름 클릭 시 달력 강조) */}
+      ;{/* ✅ 점검 참여인원 (이름 클릭 시 달력 강조) */}
       <div className="border rounded-2xl p-3 shadow-sm">
         <div className="text-sm font-medium mb-2">점검 참여인원</div>
         {allPeople.length === 0 ? (
@@ -588,7 +587,7 @@ export default function AttendancePlanner() {
                   className={classNames(
                     "text-sm rounded-full px-3 py-1 border",
                     active
-                      ? "bg-yellow-100 border-yellow-400"
+                      ? "bg-yellow-100 border-yellow-400 "
                       : "bg-white hover:bg-gray-50"
                   )}
                   onClick={() =>
@@ -603,8 +602,7 @@ export default function AttendancePlanner() {
           </div>
         )}
       </div>
-
-      {/* 입력된 날짜 (총 X일)별 인원 */}
+      ;{/* 입력된 날짜 (총 X일)별 인원 */}
       <div className="border rounded-2xl p-3 shadow-sm">
         <div className="text-sm font-medium mb-2">
           입력된 날짜 (총 {entries.length}일)별 인원
@@ -637,7 +635,6 @@ export default function AttendancePlanner() {
           </table>
         </div>
       </div>
-
       {/* 자동 생성 표: 동일 날짜세트 + days 기준 rowSpan 병합 (개별 공백일 오버라이드 지원) */}
       <div className="border rounded-2xl p-3 shadow-sm">
         <div className="text-sm font-bold mb-2">자동 생성 표</div>
@@ -752,7 +749,6 @@ export default function AttendancePlanner() {
           </table>
         </div>
       </div>
-
       {/* 날짜 해제 확인 모달 */}
       {confirm.open && (
         <div
