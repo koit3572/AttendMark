@@ -679,7 +679,7 @@ export default function AttendancePlanner() {
                 );
 
                 // 표시 문자열: "기간 (days일)"
-                const periodInline = `${computedPeriods} (${first.days}일)`;
+                const periodInline = `${computedPeriods}.(${first.days}일)`;
 
                 // <td
                 //   className=" relative h-full whitespace-nowrap"
